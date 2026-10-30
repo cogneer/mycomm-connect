@@ -1,12 +1,13 @@
 // @mycomm/connect: lets a person pair their phone and connect its SIM to MyComm from your page.
 //
-// Your server creates a connect session (POST /v1/connect-sessions) and hands its `url` to the browser. The widget
-// opens that URL in a popup (default) or an inline iframe and tells your page how it ended. It never sees an API key.
+// Your server creates a hosted link for a line (POST /partner/v1/lines/{id}/links, or POST /v1/lines/{id}/links with an
+// account key) and hands its `url` to the browser. The widget opens that URL in a popup (default) or an inline iframe and
+// tells your page how it ended. It never sees an API key.
 //
 // Every flow ends in exactly one outcome: `completed`, `ended` (the link expired, was revoked or was used elsewhere),
 // `cancelled`, `closed` (the popup was closed without an outcome) or `error` (it could not start, or timed out).
 
-const VERSION = '1.0.0';
+const VERSION = '1.1.0';
 
 /**
  * Whether the build accepts http://localhost session links. The published bundles are built without it
@@ -24,6 +25,17 @@ const OUTCOMES = /** @type {const} */ ({
 /** Why a session ended without being completed here. Anything else the page might send reads as `unknown`. */
 const END_REASONS = ['expired', 'revoked', 'completed_elsewhere'];
 
+/** The default button label per link purpose; any other purpose (or none) reads "Connect your phone". */
+const LABELS = /** @type {Record<string, string>} */ ({
+  connect: 'Connect your phone',
+  add_channel: 'Add a phone or SIM',
+  replace_device: 'Replace a phone',
+  manage: 'Manage messaging',
+});
+
+/** No message from the page said which link this was. */
+const NO_CONTEXT = Object.freeze({ purpose: null, lineId: null });
+
 /** The hosted page asks for this when it cannot keep its session inside an iframe. */
 const NEEDS_POPUP = 'mycomm.connect.needs-popup';
 
@@ -32,8 +44,8 @@ const POPUP_HEIGHT = 720;
 const CLOSED_POLL_MS = 500;
 
 const ERROR_MESSAGES = {
-  'missing-url': 'No session URL was given. Create a connect session on your server and pass its url.',
-  'invalid-url': 'The session URL is not a MyComm connect link (https, path /connect/<token>).',
+  'missing-url': 'No link URL was given. Create a hosted link on your server and pass its url.',
+  'invalid-url': 'The link URL is not a MyComm hosted link (https, path /connect/<token>).',
   'blocked-popup': 'The browser blocked the popup. Open the flow from a click.',
   'invalid-option': 'An option is not valid.',
   timeout: 'The flow was not finished in time.',
@@ -53,7 +65,7 @@ export class MyCommConnectError extends Error {
 }
 
 /**
- * The origin of a session URL, or null when it is not one: absolute, https (http only for localhost in a dev build), path /connect/….
+ * The origin of a hosted link URL, or null when it is not one: absolute, https (http only for localhost in a dev build), path /connect/….
  *
  * @param {string | null | undefined} url
  * @returns {string | null}
@@ -85,8 +97,10 @@ export function sessionOrigin(url) {
  * @param {MessageEvent} event
  * @param {string} origin
  * @param {Window | null} source
- * @returns {{kind: 'completed' | 'cancelled', detail: {sessionId: string | null, deviceId: string | null, channelId: string | null}}
- *   | {kind: 'ended', detail: {sessionId: string | null, reason: 'expired' | 'revoked' | 'completed_elsewhere' | 'unknown'}}
+ * @returns {{kind: 'completed' | 'cancelled', detail: {sessionId: string | null, deviceId: string | null, channelId: string | null,
+ *     purpose: string | null, lineId: string | null}}
+ *   | {kind: 'ended', detail: {sessionId: string | null, reason: 'expired' | 'revoked' | 'completed_elsewhere' | 'unknown',
+ *     purpose: string | null, lineId: string | null}}
  *   | {kind: 'needs-popup'} | null}
  */
 export function readMessage(event, origin, source) {
@@ -105,16 +119,18 @@ export function readMessage(event, origin, source) {
     return null;
   }
   const text = (/** @type {unknown} */ value) => (typeof value === 'string' && value.length <= 64 ? value : null);
+  // Which link this was: its purpose (`connect`, `add_channel`, `replace_device`, `manage`, `claim`, or a newer one) and line.
+  const context = { purpose: text(data.purpose), lineId: text(data.line_id) };
 
   if (kind === 'ended') {
     const reason = END_REASONS.includes(data.reason) ? data.reason : 'unknown';
 
-    return { kind, detail: { sessionId: text(data.session_id), reason } };
+    return { kind, detail: { sessionId: text(data.session_id), reason, ...context } };
   }
 
   return {
     kind,
-    detail: { sessionId: text(data.session_id), deviceId: text(data.device_id), channelId: text(data.channel_id) },
+    detail: { sessionId: text(data.session_id), deviceId: text(data.device_id), channelId: text(data.channel_id), ...context },
   };
 }
 
@@ -147,14 +163,16 @@ const STYLE = `
 `;
 
 /**
- * `<mycomm-connect url="…" mode="popup|inline" label="…" height="640" timeout="30">`
+ * `<mycomm-connect url="…" purpose="connect" mode="popup|inline" label="…" height="640" timeout="30">`
  *
  * Fires one of `mycomm-connect:completed` (detail {sessionId, deviceId, channelId}), `mycomm-connect:ended`
  * (detail {sessionId, reason}), `mycomm-connect:cancelled`, `mycomm-connect:closed` or `mycomm-connect:error`
- * (detail {code, message}) when a flow ends. Changing `url` or `mode`, or removing the element, abandons a flow in progress.
+ * (detail {code, message}) when a flow ends; every detail also has `purpose` and `lineId` as the hosted page reported them
+ * (`null` when it did not). `purpose` only picks the default button label. Changing `url` or `mode`, or removing the
+ * element, abandons a flow in progress.
  */
 export class MyCommConnectElement extends HTMLElement {
-  static observedAttributes = ['url', 'mode', 'label', 'height', 'timeout'];
+  static observedAttributes = ['url', 'mode', 'label', 'purpose', 'height', 'timeout'];
 
   /** @type {Window | null} */
   #popup = null;
@@ -244,7 +262,7 @@ export class MyCommConnectElement extends HTMLElement {
         this.stopWatching();
         this.#popup = null;
         if (!this.#finished) {
-          this.finish('closed', {});
+          this.finish('closed', { ...NO_CONTEXT });
         }
       }
     }, CLOSED_POLL_MS);
@@ -287,7 +305,7 @@ export class MyCommConnectElement extends HTMLElement {
 
   /** @param {keyof typeof ERROR_MESSAGES} code */
   fail(code) {
-    this.finish('error', { code, message: ERROR_MESSAGES[code] });
+    this.finish('error', { code, message: ERROR_MESSAGES[code], ...NO_CONTEXT });
   }
 
   /**
@@ -371,7 +389,7 @@ export class MyCommConnectElement extends HTMLElement {
     const button = document.createElement('button');
     button.type = 'button';
     button.setAttribute('part', 'button');
-    button.textContent = this.getAttribute('label') || 'Connect your phone';
+    button.textContent = this.getAttribute('label') || LABELS[this.getAttribute('purpose') ?? ''] || LABELS.connect;
     button.disabled = !valid;
     button.addEventListener('click', () => this.open());
     root.append(button);
@@ -419,9 +437,12 @@ function checkOptions(url, options) {
  *
  * @param {string} url
  * @param {{mode?: 'popup' | 'inline', container?: HTMLElement, height?: number, timeout?: number}} [options]
- * @returns {Promise<{status: 'completed', sessionId: string | null, deviceId: string | null, channelId: string | null}
- *   | {status: 'ended', sessionId: string | null, reason: 'expired' | 'revoked' | 'completed_elsewhere' | 'unknown'}
- *   | {status: 'cancelled'} | {status: 'closed'}>}
+ * @returns {Promise<{status: 'completed', sessionId: string | null, deviceId: string | null, channelId: string | null,
+ *     purpose: string | null, lineId: string | null}
+ *   | {status: 'ended', sessionId: string | null, reason: 'expired' | 'revoked' | 'completed_elsewhere' | 'unknown',
+ *     purpose: string | null, lineId: string | null}
+ *   | {status: 'cancelled', purpose: string | null, lineId: string | null}
+ *   | {status: 'closed', purpose: string | null, lineId: string | null}>}
  */
 export function open(url, options = {}) {
   return new Promise((resolve, reject) => {
@@ -453,8 +474,14 @@ export function open(url, options = {}) {
       done(() => resolve({ status: 'completed', .../** @type {CustomEvent} */ (event).detail })));
     element.addEventListener('mycomm-connect:ended', (event) =>
       done(() => resolve({ status: 'ended', .../** @type {CustomEvent} */ (event).detail })));
-    element.addEventListener('mycomm-connect:cancelled', () => done(() => resolve({ status: 'cancelled' })));
-    element.addEventListener('mycomm-connect:closed', () => done(() => resolve({ status: 'closed' })));
+    element.addEventListener('mycomm-connect:cancelled', (event) => {
+      const { purpose, lineId } = /** @type {CustomEvent} */ (event).detail;
+      done(() => resolve({ status: 'cancelled', purpose, lineId }));
+    });
+    element.addEventListener('mycomm-connect:closed', (event) => {
+      const { purpose, lineId } = /** @type {CustomEvent} */ (event).detail;
+      done(() => resolve({ status: 'closed', purpose, lineId }));
+    });
     element.addEventListener('mycomm-connect:error', (event) => {
       const { code, message } = /** @type {CustomEvent} */ (event).detail;
       done(() => reject(new MyCommConnectError(code, message)));

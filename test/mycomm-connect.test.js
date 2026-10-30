@@ -78,7 +78,7 @@ describe('readMessage', () => {
 
     expect(readMessage(event, ORIGIN, source)).toEqual({
       kind: 'completed',
-      detail: { sessionId: 's-1', deviceId: 'd-1', channelId: 'c-1' },
+      detail: { sessionId: 's-1', deviceId: 'd-1', channelId: 'c-1', purpose: null, lineId: null },
     });
   });
 
@@ -91,7 +91,7 @@ describe('readMessage', () => {
   ])('reads an ended session with reason %s as %s', (sent, reason) => {
     const event = new MessageEvent('message', { origin: ORIGIN, source, data: { type: 'mycomm.connect.ended', session_id: 's-1', reason: sent } });
 
-    expect(readMessage(event, ORIGIN, source)).toEqual({ kind: 'ended', detail: { sessionId: 's-1', reason } });
+    expect(readMessage(event, ORIGIN, source)).toEqual({ kind: 'ended', detail: { sessionId: 's-1', reason, purpose: null, lineId: null } });
   });
 
   it.each([
@@ -107,10 +107,122 @@ describe('readMessage', () => {
     const event = new MessageEvent('message', {
       origin: ORIGIN,
       source,
-      data: { type: 'mycomm.connect.completed', session_id: { evil: true }, device_id: 'x'.repeat(65), channel_id: 7 },
+      data: {
+        type: 'mycomm.connect.completed',
+        session_id: { evil: true },
+        device_id: 'x'.repeat(65),
+        channel_id: 7,
+        purpose: ['connect'],
+        line_id: 'y'.repeat(65),
+      },
     });
 
-    expect(readMessage(event, ORIGIN, source)?.detail).toEqual({ sessionId: null, deviceId: null, channelId: null });
+    expect(readMessage(event, ORIGIN, source)?.detail).toEqual({ sessionId: null, deviceId: null, channelId: null, purpose: null, lineId: null });
+  });
+});
+
+describe('purpose', () => {
+  const source = {};
+
+  it('reads the purpose and the line of a completed link', () => {
+    const event = new MessageEvent('message', {
+      origin: ORIGIN,
+      source,
+      data: {
+        type: 'mycomm.connect.completed',
+        session_id: 's-1',
+        device_id: 'd-1',
+        channel_id: 'c-1',
+        purpose: 'add_channel',
+        line_id: 'l-1',
+      },
+    });
+
+    expect(readMessage(event, ORIGIN, source)).toEqual({
+      kind: 'completed',
+      detail: { sessionId: 's-1', deviceId: 'd-1', channelId: 'c-1', purpose: 'add_channel', lineId: 'l-1' },
+    });
+  });
+
+  it('carries the purpose and the line in the completed event and in open()', async () => {
+    const popup = fakePopup();
+    vi.spyOn(window, 'open').mockReturnValue(popup);
+    const el = element({ url: URL_OK, purpose: 'replace_device' });
+    const seen = events(el);
+
+    el.open();
+    post(
+      { type: 'mycomm.connect.completed', session_id: 's-1', device_id: 'd-1', channel_id: 'c-1', purpose: 'replace_device', line_id: 'l-1' },
+      { source: popup },
+    );
+
+    expect(seen).toEqual([
+      ['completed', { sessionId: 's-1', deviceId: 'd-1', channelId: 'c-1', purpose: 'replace_device', lineId: 'l-1' }],
+    ]);
+
+    const second = fakePopup();
+    vi.spyOn(window, 'open').mockReturnValue(second);
+    const result = MyCommConnect.open(URL_OTHER);
+    post({ type: 'mycomm.connect.completed', session_id: 's-2', purpose: 'connect', line_id: 'l-2' }, { source: second });
+
+    await expect(result).resolves.toEqual({
+      status: 'completed',
+      sessionId: 's-2',
+      deviceId: null,
+      channelId: null,
+      purpose: 'connect',
+      lineId: 'l-2',
+    });
+  });
+
+  it('carries the purpose and the line in the cancelled and ended events', () => {
+    const popup = fakePopup();
+    vi.spyOn(window, 'open').mockReturnValue(popup);
+    const cancelled = element({ url: URL_OK });
+    const seenCancelled = events(cancelled);
+    cancelled.open();
+    post({ type: 'mycomm.connect.cancelled', purpose: 'manage', line_id: 'l-1' }, { source: popup });
+
+    const frame = element({ url: URL_OTHER, mode: 'inline' });
+    const seenEnded = events(frame);
+    const [, win] = frameWindow(frame);
+    post({ type: 'mycomm.connect.ended', session_id: 's-1', reason: 'revoked', purpose: 'connect', line_id: 'l-2' }, { source: win });
+
+    expect(seenCancelled).toEqual([['cancelled', { sessionId: null, deviceId: null, channelId: null, purpose: 'manage', lineId: 'l-1' }]]);
+    expect(seenEnded).toEqual([['ended', { sessionId: 's-1', reason: 'revoked', purpose: 'connect', lineId: 'l-2' }]]);
+  });
+
+  it('gives an error the purpose and the line too, unknown without a message', () => {
+    vi.spyOn(window, 'open').mockReturnValue(null);
+    const el = element({ url: URL_OK, purpose: 'manage' });
+    const seen = events(el);
+
+    el.open();
+
+    expect(seen).toEqual([['error', { code: 'blocked-popup', message: expect.any(String), purpose: null, lineId: null }]]);
+  });
+
+  it.each([
+    ['connect', 'Connect your phone'],
+    ['add_channel', 'Add a phone or SIM'],
+    ['replace_device', 'Replace a phone'],
+    ['manage', 'Manage messaging'],
+    ['claim', 'Connect your phone'],
+    ['something new', 'Connect your phone'],
+    [null, 'Connect your phone'],
+  ])('labels the button for purpose %s as "%s"', (purpose, label) => {
+    const el = element(purpose === null ? { url: URL_OK } : { url: URL_OK, purpose });
+
+    expect(el.shadowRoot.querySelector('button').textContent).toBe(label);
+  });
+
+  it('prefers the label attribute and follows a purpose change', () => {
+    const el = element({ url: URL_OK, purpose: 'manage', label: 'Messaging settings' });
+    expect(el.shadowRoot.querySelector('button').textContent).toBe('Messaging settings');
+
+    el.removeAttribute('label');
+    el.setAttribute('purpose', 'add_channel');
+    expect(el.shadowRoot.querySelector('button').textContent).toBe('Add a phone or SIM');
   });
 });
 
@@ -128,7 +240,7 @@ describe('<mycomm-connect> in popup mode', () => {
     vi.advanceTimersByTime(1000);
 
     expect(open).toHaveBeenCalledWith(URL_OK, 'mycomm-connect', expect.stringContaining('popup,width=480,height=720'));
-    expect(seen).toEqual([['completed', { sessionId: 's-1', deviceId: 'd-1', channelId: 'c-1' }]]);
+    expect(seen).toEqual([['completed', { sessionId: 's-1', deviceId: 'd-1', channelId: 'c-1', purpose: null, lineId: null }]]);
     expect(popup.close).toHaveBeenCalled();
   });
 
@@ -153,7 +265,7 @@ describe('<mycomm-connect> in popup mode', () => {
     el.open();
     post({ type: 'mycomm.connect.ended', session_id: 's-1', reason: 'expired' }, { source: popup });
 
-    expect(seen).toEqual([['ended', { sessionId: 's-1', reason: 'expired' }]]);
+    expect(seen).toEqual([['ended', { sessionId: 's-1', reason: 'expired', purpose: null, lineId: null }]]);
   });
 
   it('reports a popup closed without an outcome', () => {
@@ -166,7 +278,7 @@ describe('<mycomm-connect> in popup mode', () => {
     popup.closed = true;
     vi.advanceTimersByTime(600);
 
-    expect(seen).toEqual([['closed', {}]]);
+    expect(seen).toEqual([['closed', { purpose: null, lineId: null }]]);
   });
 
   it('ignores outcomes posted by other origins or windows', () => {
@@ -202,7 +314,7 @@ describe('<mycomm-connect> in popup mode', () => {
 
     el.open();
 
-    expect(seen).toEqual([['error', { code: 'blocked-popup', message: expect.stringContaining('blocked the popup') }]]);
+    expect(seen).toEqual([['error', { code: 'blocked-popup', message: expect.stringContaining('blocked the popup'), purpose: null, lineId: null }]]);
   });
 
   it('focuses the popup instead of opening a second one', () => {
@@ -225,7 +337,7 @@ describe('<mycomm-connect> in popup mode', () => {
     await Promise.resolve();
 
     expect(el.shadowRoot.querySelector('button').disabled).toBe(true);
-    expect(seen).toEqual([['error', { code: 'invalid-url', message: expect.any(String) }]]);
+    expect(seen).toEqual([['error', { code: 'invalid-url', message: expect.any(String), purpose: null, lineId: null }]]);
   });
 
   it('reports a missing url instead of staying silent', async () => {
@@ -344,7 +456,7 @@ describe('<mycomm-connect> in inline mode', () => {
 
     post({ type: 'mycomm.connect.completed', session_id: 's-2' }, { source: win });
 
-    expect(seen).toEqual([['completed', { sessionId: 's-2', deviceId: null, channelId: null }]]);
+    expect(seen).toEqual([['completed', { sessionId: 's-2', deviceId: null, channelId: null, purpose: null, lineId: null }]]);
   });
 
   it('reports an ended session shown in the frame', () => {
@@ -354,7 +466,7 @@ describe('<mycomm-connect> in inline mode', () => {
 
     post({ type: 'mycomm.connect.ended', reason: 'revoked' }, { source: win });
 
-    expect(seen).toEqual([['ended', { sessionId: null, reason: 'revoked' }]]);
+    expect(seen).toEqual([['ended', { sessionId: null, reason: 'revoked', purpose: null, lineId: null }]]);
   });
 
   it('times out an inline flow that nobody finishes', () => {
@@ -399,7 +511,13 @@ describe('MyCommConnect.open', () => {
     const result = MyCommConnect.open(URL_OK);
     post({ type: 'mycomm.connect.completed', session_id: 's-3', device_id: 'd-3', channel_id: 'c-3' }, { source: popup });
 
-    await expect(result).resolves.toEqual({ status: 'completed', sessionId: 's-3', deviceId: 'd-3', channelId: 'c-3' });
+    await expect(result).resolves.toEqual({
+      status: 'completed',
+      sessionId: 's-3',
+      deviceId: 'd-3',
+      channelId: 'c-3',
+      purpose: null, lineId: null,
+    });
     expect(document.querySelector('mycomm-connect')).toBeNull();
   });
 
@@ -410,7 +528,7 @@ describe('MyCommConnect.open', () => {
     const result = MyCommConnect.open(URL_OK);
     post({ type: 'mycomm.connect.ended', session_id: 's-4', reason: 'expired' }, { source: popup });
 
-    await expect(result).resolves.toEqual({ status: 'ended', sessionId: 's-4', reason: 'expired' });
+    await expect(result).resolves.toEqual({ status: 'ended', sessionId: 's-4', reason: 'expired', purpose: null, lineId: null });
   });
 
   it('rejects with a typed error when it cannot start', async () => {
@@ -444,7 +562,7 @@ describe('MyCommConnect.open', () => {
     expect(frame.style.height).toBe('500px');
     post({ type: 'mycomm.connect.cancelled' }, { source: win });
 
-    await expect(result).resolves.toEqual({ status: 'cancelled' });
+    await expect(result).resolves.toEqual({ status: 'cancelled', purpose: null, lineId: null });
     expect(container.querySelector('mycomm-connect')).toBeNull();
   });
 
