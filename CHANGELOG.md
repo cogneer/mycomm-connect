@@ -6,9 +6,9 @@ For the API `2.0.0`, where hosted links for a line replace connect sessions. Onl
 
 ### Integrity (SRI)
 
-- `dist/mycomm-connect.js`: `sha384-ABJUpr94QI3UWpBKNBjGbTPQNCP+bhyns18shMSWT5CJZaUIMlaGLfhoU4hXtlq9`
-- `dist/mycomm-connect.min.js`: `sha384-zjWec3DjfJ6L9dOntS8rV1NHiuArH5Oo4+O5bo8vdVaUfs4Miq8aajK3HBn/wLpq`
-- `dist/mycomm-connect.iife.min.js`: `sha384-FJH/73HNHR3zwVzMoLwPOkK/F2ymI5R+4kdQ9YNKb0ovxVMiHjR0XaLxeZw//Yap`
+- `dist/mycomm-connect.js`: `sha384-KUahyGj/uqBYUqLbVlp2cCYhXEcKiKMr8RLTQiJdN/Or5szT29+MN1gv5jHaSHXM`
+- `dist/mycomm-connect.min.js`: `sha384-cEJ9jtIJGmPBNr6tAAXMaka94O8cJEUME8PSA7FR6IuVe/9vhOcaVGPKGZ0OvTIV`
+- `dist/mycomm-connect.iife.min.js`: `sha384-8bubOxMkou37YAN3w7Neldo2Ig2auDHoULBqYh6PHZIOtu5sAtSYxh3Va8dubKgp`
 
 ### Added
 

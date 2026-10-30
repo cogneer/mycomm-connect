@@ -26,12 +26,14 @@ const OUTCOMES = /** @type {const} */ ({
 const END_REASONS = ['expired', 'revoked', 'completed_elsewhere'];
 
 /** The default button label per link purpose; any other purpose (or none) reads "Connect your phone". */
-const LABELS = /** @type {Record<string, string>} */ ({
-  connect: 'Connect your phone',
-  add_channel: 'Add a phone or SIM',
-  replace_device: 'Replace a phone',
-  manage: 'Manage messaging',
-});
+const LABELS = /** @type {Record<string, string>} */ (
+  Object.assign(Object.create(null), {
+    connect: 'Connect your phone',
+    add_channel: 'Add a phone or SIM',
+    replace_device: 'Replace a phone',
+    manage: 'Manage messaging',
+  })
+);
 
 /** No message from the page said which link this was. */
 const NO_CONTEXT = Object.freeze({ purpose: null, lineId: null });
@@ -224,6 +226,11 @@ export class MyCommConnectElement extends HTMLElement {
     return this.getAttribute('url') ?? '';
   }
 
+  /** The `purpose` attribute, which only picks the default button label. */
+  get purpose() {
+    return this.getAttribute('purpose');
+  }
+
   get mode() {
     return this.getAttribute('mode') === 'inline' ? 'inline' : 'popup';
   }
@@ -389,7 +396,9 @@ export class MyCommConnectElement extends HTMLElement {
     const button = document.createElement('button');
     button.type = 'button';
     button.setAttribute('part', 'button');
-    button.textContent = this.getAttribute('label') || LABELS[this.getAttribute('purpose') ?? ''] || LABELS.connect;
+    const purpose = this.purpose;
+    button.textContent =
+      this.getAttribute('label') || (purpose !== null && purpose in LABELS ? LABELS[purpose] : LABELS.connect);
     button.disabled = !valid;
     button.addEventListener('click', () => this.open());
     root.append(button);

@@ -209,6 +209,9 @@ describe('purpose', () => {
     ['manage', 'Manage messaging'],
     ['claim', 'Connect your phone'],
     ['something new', 'Connect your phone'],
+    ['constructor', 'Connect your phone'],
+    ['toString', 'Connect your phone'],
+    ['__proto__', 'Connect your phone'],
     [null, 'Connect your phone'],
   ])('labels the button for purpose %s as "%s"', (purpose, label) => {
     const el = element(purpose === null ? { url: URL_OK } : { url: URL_OK, purpose });

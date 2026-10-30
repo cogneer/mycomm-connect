@@ -72,7 +72,8 @@ export declare class MyCommConnectElement extends HTMLElement {
   static observedAttributes: string[];
   readonly url: string;
   readonly mode: 'popup' | 'inline';
-  /** Set the `purpose` attribute to pick the default button label; it changes nothing else. */
+  /** The `purpose` attribute: it picks the default button label and changes nothing else. */
+  readonly purpose: string | null;
   /** Minutes after which an unfinished flow ends in a `timeout` error; 0 for no limit. */
   readonly timeout: number;
   /** Opens the flow in a popup, as a click on the button does. */
