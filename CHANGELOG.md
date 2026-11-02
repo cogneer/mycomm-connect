@@ -1,5 +1,26 @@
 # Changelog
 
+## [1.1.0] - Unreleased
+
+For the API `2.0.0`, where hosted links for a line replace connect sessions. Only adds: a 1.0.0 page keeps working.
+
+### Integrity (SRI)
+
+- `dist/mycomm-connect.js`: `sha384-KUahyGj/uqBYUqLbVlp2cCYhXEcKiKMr8RLTQiJdN/Or5szT29+MN1gv5jHaSHXM`
+- `dist/mycomm-connect.min.js`: `sha384-cEJ9jtIJGmPBNr6tAAXMaka94O8cJEUME8PSA7FR6IuVe/9vhOcaVGPKGZ0OvTIV`
+- `dist/mycomm-connect.iife.min.js`: `sha384-8bubOxMkou37YAN3w7Neldo2Ig2auDHoULBqYh6PHZIOtu5sAtSYxh3Va8dubKgp`
+
+### Added
+
+- `purpose` and `lineId` in the detail of every event (`completed`, `ended`, `cancelled`, `closed`, `error`) and in what
+  `open()` resolves with, read from the hosted page's messages (`mycomm.connect.completed` carries `{session_id,
+  device_id, channel_id, purpose, line_id}`); `null` when no message said so.
+- The optional `purpose` attribute, for the default button label only: `connect` "Connect your phone", `add_channel`
+  "Add a phone or SIM", `replace_device` "Replace a phone", `manage` "Manage messaging". `label` still wins.
+- Types `LinkPurpose`, `LinkContext` and `EndedDetail`.
+- README: hosted links (`POST /partner/v1/lines/{id}/links`, `POST /v1/lines/{id}/links`) instead of connect sessions,
+  the purposes, and the Laravel component.
+
 ## [1.0.0] - 2026-10-26
 
 The first stable release, for the frozen API `1.0.0`. From here the package follows semantic versioning: `1.x` releases

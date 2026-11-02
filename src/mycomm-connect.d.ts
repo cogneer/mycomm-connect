@@ -1,8 +1,23 @@
+/** What a hosted link is for. A newer purpose arrives as its plain string. */
+export type LinkPurpose = 'connect' | 'add_channel' | 'replace_device' | 'manage' | 'claim';
+
+/** Which link a flow was for, as the hosted page reports it; `null` when no message from the page said so. */
+export interface LinkContext {
+  purpose: LinkPurpose | (string & {}) | null;
+  lineId: string | null;
+}
+
 /** The ids the hosted page reports when a phone was paired and its SIM connected. */
-export interface ConnectResult {
+export interface ConnectResult extends LinkContext {
   sessionId: string | null;
   deviceId: string | null;
   channelId: string | null;
+}
+
+/** The detail of `mycomm-connect:ended`. */
+export interface EndedDetail extends LinkContext {
+  sessionId: string | null;
+  reason: EndReason;
 }
 
 /** Why a session ended without being completed on this page. */
@@ -11,9 +26,9 @@ export type EndReason = 'expired' | 'revoked' | 'completed_elsewhere' | 'unknown
 /** What `open()` resolves with. Every flow ends in exactly one of these, or rejects with a `MyCommConnectError`. */
 export type ConnectOutcome =
   | ({ status: 'completed' } & ConnectResult)
-  | { status: 'ended'; sessionId: string | null; reason: EndReason }
-  | { status: 'cancelled' }
-  | { status: 'closed' };
+  | ({ status: 'ended' } & EndedDetail)
+  | ({ status: 'cancelled' } & LinkContext)
+  | ({ status: 'closed' } & LinkContext);
 
 export type ConnectErrorCode = 'missing-url' | 'invalid-url' | 'blocked-popup' | 'invalid-option' | 'timeout';
 
@@ -41,7 +56,7 @@ export declare function sessionOrigin(url: string | null | undefined): string | 
 /** The result of reading a message from the hosted page; `null` for anything not documented, or not from the page. */
 export type PageMessage =
   | { kind: 'completed' | 'cancelled'; detail: ConnectResult }
-  | { kind: 'ended'; detail: { sessionId: string | null; reason: EndReason } }
+  | { kind: 'ended'; detail: EndedDetail }
   | { kind: 'needs-popup' };
 
 /** Reads a message from the hosted page: only from its origin and its window, and only documented types. */
@@ -57,6 +72,8 @@ export declare class MyCommConnectElement extends HTMLElement {
   static observedAttributes: string[];
   readonly url: string;
   readonly mode: 'popup' | 'inline';
+  /** The `purpose` attribute: it picks the default button label and changes nothing else. */
+  readonly purpose: string | null;
   /** Minutes after which an unfinished flow ends in a `timeout` error; 0 for no limit. */
   readonly timeout: number;
   /** Opens the flow in a popup, as a click on the button does. */
@@ -72,9 +89,9 @@ declare global {
   }
   interface HTMLElementEventMap {
     'mycomm-connect:completed': CustomEvent<ConnectResult>;
-    'mycomm-connect:ended': CustomEvent<{ sessionId: string | null; reason: EndReason }>;
-    'mycomm-connect:cancelled': CustomEvent<Record<string, never>>;
-    'mycomm-connect:closed': CustomEvent<Record<string, never>>;
-    'mycomm-connect:error': CustomEvent<{ code: ConnectErrorCode; message: string }>;
+    'mycomm-connect:ended': CustomEvent<EndedDetail>;
+    'mycomm-connect:cancelled': CustomEvent<ConnectResult>;
+    'mycomm-connect:closed': CustomEvent<LinkContext>;
+    'mycomm-connect:error': CustomEvent<{ code: ConnectErrorCode; message: string } & LinkContext>;
   }
 }

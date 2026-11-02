@@ -2,28 +2,44 @@
 
 A drop-in widget that lets the people using your product pair their Android phone and connect its SIM to
 [MyComm](https://mycomm.cogneer.tech), without leaving your app and without a MyComm login. Built for partners
-whose tenants each bring their own phone.
+whose tenants each bring their own phone: each tenant has a line, and the widget opens a hosted link for it.
 
-The widget shows MyComm's hosted connect page in a popup (default) or inline, and tells your page how it ended.
-It never sees an API key: your server creates a short-lived **connect session** and gives the browser only its
+The widget shows MyComm's hosted page in a popup (default) or inline, and tells your page how it ended. It never
+sees an API key: your server creates a short-lived **hosted link** for the tenant's line and gives the browser only its
 URL.
 
-## 1. Create a connect session on your server
+## 1. Create a hosted link on your server
 
-With the PHP SDK, acting as the tenant's managed account:
+With the PHP SDK and a partner key, for the line you made for the tenant (`$partner->partner->lines->create(...)`):
 
 ```php
-$session = $mycomm->forAccount($tenant->mycomm_account_id)->connectSessions->create(
+use MyComm\Enums\HostedLinkPurpose;
+
+$link = $partner->partner->lines->links->create(
+    $tenant->mycomm_line_id,
+    purpose: HostedLinkPurpose::Connect,
     return_url: 'https://app.example.com/settings/sms',
     allowed_origins: ['https://app.example.com'],
 );
 
-// Hand $session->url to the page. It works once per tenant session, for 30 minutes by default.
+// Hand $link->url to the page. It is a credential for this line, valid 30 minutes by default.
 ```
 
-Or with any HTTP client: `POST /v1/connect-sessions` with your key (and `MyComm-Account` for a partner key).
-`allowed_origins` must list the origin of the page that shows the widget: the hosted page reports back only to
-those origins, and only they may frame it.
+With Node: `await partner.partner.lines.links.create(lineId, { purpose: 'connect', return_url, allowed_origins })`. With
+Laravel, `<x-mycomm-connect :line="$lineId" purpose="connect" />` creates the link and renders this element in one step.
+Or with any HTTP client: `POST /partner/v1/lines/{id}/links` with your partner key, or `POST /v1/lines/{id}/links` with an
+account key for its own line. `allowed_origins` must list the origin of the page that shows the widget: the hosted page
+reports back only to those origins, and only they may frame it.
+
+`purpose` is what the hosted page does:
+
+| Purpose          | The page                                                                   | Default button label |
+| ---------------- | -------------------------------------------------------------------------- | -------------------- |
+| `connect`        | Pairs the first phone and verifies its number (joining the user's account) | Connect your phone   |
+| `add_channel`    | Adds one more phone or SIM to the line                                     | Add a phone or SIM   |
+| `replace_device` | Pairs a new phone in place of `replaces_device_id`                         | Replace a phone      |
+| `manage`         | Lets the user manage the line's phones and rules                           | Manage messaging     |
+| `claim`          | Lets the user claim the account the line lives in                          | Connect your phone   |
 
 ## 2. Show the widget
 
@@ -36,7 +52,7 @@ import '@mycomm/connect';
 ```
 
 ```html
-<mycomm-connect url="https://mycomm.cogneer.tech/connect/k3J…"></mycomm-connect>
+<mycomm-connect url="https://mycomm.cogneer.tech/connect/k3J…" purpose="connect"></mycomm-connect>
 ```
 
 Without a bundler, load an exact version with its integrity hash (printed by the build and listed in the
@@ -44,19 +60,20 @@ Without a bundler, load an exact version with its integrity hash (printed by the
 
 ```html
 <!-- as a module: import "@mycomm/connect" semantics, the element registers itself -->
-<script type="module" src="https://cdn.jsdelivr.net/npm/@mycomm/connect@1.0.0/dist/mycomm-connect.min.js"
-        integrity="sha384-RnjF+Gn70M3rRVDW52U1GrcAatKnWRl8XGW1k3s5KKY8a4NIkV1+0Mo3/bFpLOjv" crossorigin="anonymous"></script>
+<script type="module" src="https://cdn.jsdelivr.net/npm/@mycomm/connect@1.1.0/dist/mycomm-connect.min.js"
+        integrity="sha384-cEJ9jtIJGmPBNr6tAAXMaka94O8cJEUME8PSA7FR6IuVe/9vhOcaVGPKGZ0OvTIV" crossorigin="anonymous"></script>
 
 <!-- as a classic script: also sets window.MyCommConnect.open() -->
-<script src="https://cdn.jsdelivr.net/npm/@mycomm/connect@1.0.0/dist/mycomm-connect.iife.min.js"
-        integrity="sha384-Y7JqAI9m3TXZQgCgvUrmxDUTKmoGTWrvfMvXYNB/C+8/9ce0+fRRV7ylmhmDAK/k" crossorigin="anonymous"></script>
+<script src="https://cdn.jsdelivr.net/npm/@mycomm/connect@1.1.0/dist/mycomm-connect.iife.min.js"
+        integrity="sha384-8bubOxMkou37YAN3w7Neldo2Ig2auDHoULBqYh6PHZIOtu5sAtSYxh3Va8dubKgp" crossorigin="anonymous"></script>
 ```
 
 | Attribute | |
 |---|---|
-| `url` | The session URL from step 1. Required; without it the element reports a `missing-url` error. |
+| `url` | The link URL from step 1. Required; without it the element reports a `missing-url` error. |
+| `purpose` | The link's purpose, for the default button label only (see the table in step 1). Optional. |
 | `mode` | `popup` (default): a button that opens the flow in a popup. `inline`: the flow in an iframe on your page. |
-| `label` | Button text in popup mode. Default "Connect your phone". |
+| `label` | Button text in popup mode. Default: the label of `purpose`, else "Connect your phone". |
 | `height` | Iframe height in pixels in inline mode. Default 640. |
 | `timeout` | Minutes after which an unfinished flow ends in a `timeout` error. Default: no limit. |
 
@@ -65,25 +82,26 @@ for the old link.
 
 ## 3. Listen for the outcome
 
-Every flow ends in exactly one of these:
+Every flow ends in exactly one of these. Every detail also carries `purpose` and `lineId`, the link's purpose and line
+as the hosted page reported them, or `null` when no message from the page said so (`closed`, `error`):
 
 | Event | Detail | When |
 |---|---|---|
-| `mycomm-connect:completed` | `{sessionId, deviceId, channelId}` | The phone is paired and its SIM connected |
-| `mycomm-connect:ended` | `{sessionId, reason}` | The link cannot be used: `expired`, `revoked`, `completed_elsewhere` (or `unknown` for a reason newer than this version) |
-| `mycomm-connect:cancelled` | | The person cancelled |
-| `mycomm-connect:closed` | | The popup was closed before any outcome |
-| `mycomm-connect:error` | `{code, message}` | The flow could not start or finish. `code` is `missing-url`, `invalid-url`, `blocked-popup`, `invalid-option` or `timeout` |
+| `mycomm-connect:completed` | `{sessionId, deviceId, channelId, purpose, lineId}` | The link's work is done: for `connect`, the phone is paired and its SIM connected |
+| `mycomm-connect:ended` | `{sessionId, reason, purpose, lineId}` | The link cannot be used: `expired`, `revoked`, `completed_elsewhere` (or `unknown` for a reason newer than this version) |
+| `mycomm-connect:cancelled` | `{purpose, lineId}` | The person cancelled |
+| `mycomm-connect:closed` | `{purpose, lineId}` | The popup was closed before any outcome |
+| `mycomm-connect:error` | `{code, message, purpose, lineId}` | The flow could not start or finish. `code` is `missing-url`, `invalid-url`, `blocked-popup`, `invalid-option` or `timeout` |
 
 ```js
 const widget = document.querySelector('mycomm-connect');
 
 widget.addEventListener('mycomm-connect:completed', (event) => {
-  const { sessionId, deviceId, channelId } = event.detail;
+  const { sessionId, deviceId, channelId, purpose, lineId } = event.detail;
   // The phone is paired and its number verified. Confirm on your server:
-  // GET /v1/connect-sessions/{sessionId} reads "completed".
+  // GET /partner/v1/links/{sessionId} (or /v1/links/{sessionId}) reads "completed".
 });
-widget.addEventListener('mycomm-connect:ended', (event) => { /* ask your server for a new session */ });
+widget.addEventListener('mycomm-connect:ended', (event) => { /* ask your server for a new link */ });
 widget.addEventListener('mycomm-connect:cancelled', () => { /* the person cancelled */ });
 widget.addEventListener('mycomm-connect:closed', () => { /* the popup was closed before the end */ });
 widget.addEventListener('mycomm-connect:error', (event) => {
@@ -91,8 +109,9 @@ widget.addEventListener('mycomm-connect:error', (event) => {
 });
 ```
 
-Treat these events as a signal to refresh, not as proof: confirm on your server with
-`GET /v1/connect-sessions/{id}`, or with the `device.paired` and `channel.connected` webhooks.
+Treat these events as a signal to refresh, not as proof: confirm on your server with `GET /partner/v1/links/{id}`
+(`GET /v1/links/{id}` for an account key) or `GET /partner/v1/lines/{id}/status`, or with the `line.connected`,
+`device.paired` and `channel.connected` webhooks.
 
 Or without an element (call it from a click handler, so the browser allows the popup):
 
@@ -101,7 +120,7 @@ import { open, MyCommConnectError } from '@mycomm/connect';
 
 button.addEventListener('click', async () => {
   try {
-    const outcome = await open(sessionUrl, { timeout: 30 });   // { status: 'completed' | 'ended' | 'cancelled' | 'closed', ... }
+    const outcome = await open(linkUrl, { timeout: 30 });   // { status: 'completed' | 'ended' | 'cancelled' | 'closed', purpose, lineId, ... }
   } catch (error) {
     if (error instanceof MyCommConnectError) {
       console.error(error.code, error.message);
@@ -132,7 +151,7 @@ Types are included. `ConnectOutcome` is a union you can `switch` on by `status`,
 import '@mycomm/connect';
 import { useEffect, useRef } from 'react';
 
-export function ConnectPhone({ sessionUrl, onDone }) {
+export function ConnectPhone({ linkUrl, onDone }) {
   const ref = useRef(null);
   useEffect(() => {
     const el = ref.current;
@@ -142,18 +161,19 @@ export function ConnectPhone({ sessionUrl, onDone }) {
     return () => names.forEach((name) => el.removeEventListener(name, done));
   }, [onDone]);
 
-  return <mycomm-connect ref={ref} url={sessionUrl} />;
+  return <mycomm-connect ref={ref} url={linkUrl} purpose="connect" />;
 }
 ```
 
 ### Livewire and Blade
 
 ```blade
-<mycomm-connect url="{{ $sessionUrl }}"
-                x-on:mycomm-connect:completed="$wire.phoneConnected($event.detail.sessionId)"></mycomm-connect>
+<x-mycomm-connect :line="$lineId" purpose="connect"
+                  x-on:mycomm-connect:completed="$wire.phoneConnected($event.detail.sessionId)" />
 ```
 
-Create `$sessionUrl` per visit on the server (step 1) and never cache or log it.
+The component of `mycomm/mycomm-laravel` creates the link per page view (step 1); never cache or log it. Without the
+package, render `<mycomm-connect url="{{ $linkUrl }}" purpose="connect">` with a link you create per visit.
 
 ## Browser support and your Content-Security-Policy
 
@@ -182,14 +202,14 @@ frame for the same reason.
 
 ## Security
 
-- The session URL must be `https://…/connect/<token>` (no user info). `http://localhost` links work only in a build made with
+- The link URL must be `https://…/connect/<token>` (no user info). `http://localhost` links work only in a build made with
   `MYCOMM_CONNECT_DEV=1`; the published bundles refuse them.
 - The iframe has no `sandbox` attribute: the hosted page needs its cookies, `postMessage` and top-level navigation to pair a
   phone, and a sandbox that allows them adds nothing. What protects you is that the widget accepts messages only from the
-  session URL's origin and only from the window it opened.
-- Messages are accepted only from the session URL's origin and from the popup or frame the widget opened, and
+  link URL's origin and only from the window it opened.
+- Messages are accepted only from the link URL's origin and from the popup or frame the widget opened, and
   only with the documented types.
-- The session URL is a credential for one tenant: create it per visit, do not log it, do not put it in a URL
+- The link URL is a credential for one line: create it per visit, do not log it, do not put it in a URL
   of your own.
 
 ## Development

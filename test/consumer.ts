@@ -1,12 +1,12 @@
 // Type-checked in CI (`npm run lint`): what a TypeScript project writes against the published declarations.
-import MyCommConnect, { MyCommConnectError, open, readMessage, sessionOrigin, type ConnectOutcome } from '../src/mycomm-connect.js';
+import MyCommConnect, { MyCommConnectError, open, readMessage, sessionOrigin, type ConnectOutcome, type LinkPurpose } from '../src/mycomm-connect.js';
 
 async function pair(sessionUrl: string): Promise<string> {
   try {
     const outcome: ConnectOutcome = await open(sessionUrl, { mode: 'inline', height: 600, timeout: 30 });
     switch (outcome.status) {
       case 'completed':
-        return `channel ${outcome.channelId} on device ${outcome.deviceId}`;
+        return `channel ${outcome.channelId} on device ${outcome.deviceId} for ${outcome.purpose ?? 'a link'} of line ${outcome.lineId}`;
       case 'ended':
         return `ended: ${outcome.reason}`;
       case 'cancelled':
@@ -23,8 +23,9 @@ async function pair(sessionUrl: string): Promise<string> {
 
 const widget = document.querySelector('mycomm-connect');
 widget?.addEventListener('mycomm-connect:completed', (event) => {
-  const { sessionId } = event.detail;
-  console.log(sessionId);
+  const { sessionId, purpose, lineId } = event.detail;
+  const known: LinkPurpose | (string & {}) | null = purpose;
+  console.log(sessionId, known, lineId);
 });
 widget?.addEventListener('mycomm-connect:error', (event) => {
   console.log(event.detail.code, event.detail.message);
