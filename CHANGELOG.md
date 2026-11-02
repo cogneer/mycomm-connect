@@ -1,6 +1,6 @@
 # Changelog
 
-## [1.1.0] - Unreleased
+## [1.1.0] - 2026-11-02
 
 For the API `2.0.0`, where hosted links for a line replace connect sessions. Only adds: a 1.0.0 page keeps working.
 
