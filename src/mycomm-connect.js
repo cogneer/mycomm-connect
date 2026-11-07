@@ -1,7 +1,7 @@
 // @mycomm/connect: lets a person pair their phone and connect its SIM to MyComm from your page.
 //
-// Your server creates a hosted link for a line (POST /partner/v1/lines/{id}/links, or POST /v1/lines/{id}/links with an
-// account key) and hands its `url` to the browser. The widget opens that URL in a popup (default) or an inline iframe and
+// Your server creates a hosted link for a line (POST /partner/v1/lines/{id}/links, or POST /v1/lines/{id}/links with a
+// user key) and hands its `url` to the browser. The widget opens that URL in a popup (default) or an inline iframe and
 // tells your page how it ended. It never sees an API key.
 //
 // Every flow ends in exactly one outcome: `completed`, `ended` (the link expired, was revoked or was used elsewhere),

@@ -27,19 +27,19 @@ $link = $partner->partner->lines->links->create(
 
 With Node: `await partner.partner.lines.links.create(lineId, { purpose: 'connect', return_url, allowed_origins })`. With
 Laravel, `<x-mycomm-connect :line="$lineId" purpose="connect" />` creates the link and renders this element in one step.
-Or with any HTTP client: `POST /partner/v1/lines/{id}/links` with your partner key, or `POST /v1/lines/{id}/links` with an
-account key for its own line. `allowed_origins` must list the origin of the page that shows the widget: the hosted page
+Or with any HTTP client: `POST /partner/v1/lines/{id}/links` with your partner key, or `POST /v1/lines/{id}/links` with a
+user key for its own line. `allowed_origins` must list the origin of the page that shows the widget: the hosted page
 reports back only to those origins, and only they may frame it.
 
 `purpose` is what the hosted page does:
 
 | Purpose          | The page                                                                   | Default button label |
 | ---------------- | -------------------------------------------------------------------------- | -------------------- |
-| `connect`        | Pairs the first phone and verifies its number (joining the user's account) | Connect your phone   |
+| `connect`        | Pairs the first phone and verifies its number (joining the number's user)   | Connect your phone   |
 | `add_channel`    | Adds one more phone or SIM to the line                                     | Add a phone or SIM   |
 | `replace_device` | Pairs a new phone in place of `replaces_device_id`                         | Replace a phone      |
 | `manage`         | Lets the user manage the line's phones and rules                           | Manage messaging     |
-| `claim`          | Lets the user claim the account the line lives in                          | Connect your phone   |
+| `claim`          | Lets the user claim the line and its numbers, and sign in                  | Connect your phone   |
 
 ## 2. Show the widget
 
@@ -110,7 +110,7 @@ widget.addEventListener('mycomm-connect:error', (event) => {
 ```
 
 Treat these events as a signal to refresh, not as proof: confirm on your server with `GET /partner/v1/links/{id}`
-(`GET /v1/links/{id}` for an account key) or `GET /partner/v1/lines/{id}/status`, or with the `line.connected`,
+(`GET /v1/links/{id}` for a user key) or `GET /partner/v1/lines/{id}/status`, or with the `line.connected`,
 `device.paired` and `channel.connected` webhooks.
 
 Or without an element (call it from a click handler, so the browser allows the popup):
