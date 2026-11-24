@@ -20,6 +20,20 @@ export interface EndedDetail extends LinkContext {
   reason: EndReason;
 }
 
+/**
+ * A step id of the hosted card, as `mycomm.connect.step` posts it. More ids may be added: treat one you do not know as
+ * "in progress". `account` stands for everything in the person's own MyComm (signing in, picking a number, approving).
+ */
+export type ConnectStep =
+  | 'welcome' | 'app' | 'type' | 'pair' | 'setup' | 'sims' | 'connect' | 'verify' | 'done' | 'test' | 'continued'
+  | 'account' | 'number_held' | 'cancelled' | 'manage';
+
+/** The detail of `mycomm-connect:step`, and what `onStep` is called with: which step the hosted card is on. Not an outcome. */
+export interface StepDetail extends LinkContext {
+  sessionId: string | null;
+  step: ConnectStep | (string & {});
+}
+
 /** Why a session ended without being completed on this page. */
 export type EndReason = 'expired' | 'revoked' | 'completed_elsewhere' | 'unknown';
 
@@ -48,6 +62,8 @@ export interface OpenOptions {
   height?: number;
   /** Minutes after which an unfinished flow rejects with a `timeout` error. No limit by default. */
   timeout?: number;
+  /** Called each time the hosted card moves to another step (and when it first loads). A hint for progress, not proof. */
+  onStep?: (detail: StepDetail) => void;
 }
 
 /** The origin of a valid session link, or `null` when the link is not one. */
@@ -57,6 +73,7 @@ export declare function sessionOrigin(url: string | null | undefined): string | 
 export type PageMessage =
   | { kind: 'completed' | 'cancelled'; detail: ConnectResult }
   | { kind: 'ended'; detail: EndedDetail }
+  | { kind: 'step'; detail: StepDetail }
   | { kind: 'needs-popup' };
 
 /** Reads a message from the hosted page: only from its origin and its window, and only documented types. */
@@ -92,6 +109,7 @@ declare global {
     'mycomm-connect:ended': CustomEvent<EndedDetail>;
     'mycomm-connect:cancelled': CustomEvent<ConnectResult>;
     'mycomm-connect:closed': CustomEvent<LinkContext>;
+    'mycomm-connect:step': CustomEvent<StepDetail>;
     'mycomm-connect:error': CustomEvent<{ code: ConnectErrorCode; message: string } & LinkContext>;
   }
 }

@@ -550,6 +550,7 @@ describe('MyCommConnect.open', () => {
     await expect(MyCommConnect.open(URL_OK, { mode: 'inline', container: '#slot' })).rejects.toMatchObject({ code: 'invalid-option' });
     await expect(MyCommConnect.open(URL_OK, { height: -5 })).rejects.toMatchObject({ code: 'invalid-option' });
     await expect(MyCommConnect.open(URL_OK, { timeout: 0 })).rejects.toMatchObject({ code: 'invalid-option' });
+    await expect(MyCommConnect.open(URL_OK, { onStep: 'progress' })).rejects.toMatchObject({ code: 'invalid-option' });
 
     expect(document.querySelector('mycomm-connect')).toBeNull();
     expect(open).not.toHaveBeenCalled();
@@ -578,5 +579,78 @@ describe('MyCommConnect.open', () => {
     vi.advanceTimersByTime(61_000);
 
     await settled;
+  });
+});
+
+describe('step', () => {
+  const source = {};
+  const STEP = { type: 'mycomm.connect.step', session_id: 's-1', purpose: 'connect', line_id: 'l-1', step: 'pair' };
+
+  it('reads the step the card is on, a newer step id as it is', () => {
+    const read = (data) => readMessage(new MessageEvent('message', { origin: ORIGIN, source, data }), ORIGIN, source);
+
+    expect(read(STEP)).toEqual({ kind: 'step', detail: { sessionId: 's-1', step: 'pair', purpose: 'connect', lineId: 'l-1' } });
+    expect(read({ ...STEP, step: 'some_new_step' })?.detail.step).toBe('some_new_step');
+  });
+
+  it.each([
+    ['no step', undefined],
+    ['a number', 3],
+    ['markup', '<b>pair</b>'],
+    ['the link form', 'open:pair'],
+    ['a long string', 'x'.repeat(65)],
+  ])('drops a step message with %s', (_, step) => {
+    const event = new MessageEvent('message', { origin: ORIGIN, source, data: { ...STEP, step } });
+
+    expect(readMessage(event, ORIGIN, source)).toBeNull();
+  });
+
+  it('ignores a step from another origin or window', () => {
+    expect(readMessage(new MessageEvent('message', { origin: 'https://evil.example', source, data: STEP }), ORIGIN, source)).toBeNull();
+    expect(readMessage(new MessageEvent('message', { origin: ORIGIN, source: {}, data: STEP }), ORIGIN, source)).toBeNull();
+  });
+
+  it('fires mycomm-connect:step while the popup runs, and the flow still ends once', () => {
+    const popup = fakePopup();
+    vi.spyOn(window, 'open').mockReturnValue(popup);
+    const el = element({ url: URL_OK });
+    const seen = [];
+    el.addEventListener('mycomm-connect:step', (event) => seen.push(['step', event.detail.step]));
+    const outcomes = events(el);
+
+    el.open();
+    post(STEP, { source: popup });
+    post({ ...STEP, step: 'sims' }, { source: {} });
+    post({ ...STEP, step: 'verify' }, { source: popup });
+    expect(popup.close).not.toHaveBeenCalled();
+    post({ type: 'mycomm.connect.completed', session_id: 's-1' }, { source: popup });
+    post({ ...STEP, step: 'test' }, { source: popup });
+
+    expect(seen).toEqual([['step', 'pair'], ['step', 'verify']]);
+    expect(outcomes.map(([name]) => name)).toEqual(['completed']);
+  });
+
+  it('fires mycomm-connect:step from the inline frame', () => {
+    const el = element({ url: URL_OK, mode: 'inline' });
+    const seen = [];
+    el.addEventListener('mycomm-connect:step', (event) => seen.push(event.detail));
+    const [, win] = frameWindow(el);
+
+    post({ ...STEP, step: 'welcome' }, { source: win });
+
+    expect(seen).toEqual([{ sessionId: 's-1', step: 'welcome', purpose: 'connect', lineId: 'l-1' }]);
+  });
+
+  it('calls onStep from open() and resolves with the outcome', async () => {
+    const popup = fakePopup();
+    vi.spyOn(window, 'open').mockReturnValue(popup);
+    const onStep = vi.fn();
+
+    const result = MyCommConnect.open(URL_OK, { onStep });
+    post({ ...STEP, purpose: 'manage', step: 'manage' }, { source: popup });
+    post({ type: 'mycomm.connect.ended', session_id: 's-1', purpose: 'manage', reason: 'revoked' }, { source: popup });
+
+    await expect(result).resolves.toMatchObject({ status: 'ended', reason: 'revoked', purpose: 'manage' });
+    expect(onStep).toHaveBeenCalledExactlyOnceWith({ sessionId: 's-1', step: 'manage', purpose: 'manage', lineId: 'l-1' });
   });
 });

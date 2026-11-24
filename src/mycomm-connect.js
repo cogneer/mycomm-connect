@@ -5,9 +5,10 @@
 // tells your page how it ended. It never sees an API key.
 //
 // Every flow ends in exactly one outcome: `completed`, `ended` (the link expired, was revoked or was used elsewhere),
-// `cancelled`, `closed` (the popup was closed without an outcome) or `error` (it could not start, or timed out).
+// `cancelled`, `closed` (the popup was closed without an outcome) or `error` (it could not start, or timed out). While it
+// runs, `step` reports which step the hosted card is on (a hint for showing progress, never an outcome).
 
-const VERSION = '1.1.0';
+const VERSION = '1.2.0';
 
 /**
  * Whether the build accepts http://localhost session links. The published bundles are built without it
@@ -21,6 +22,9 @@ const OUTCOMES = /** @type {const} */ ({
   'mycomm.connect.cancelled': 'cancelled',
   'mycomm.connect.ended': 'ended',
 });
+
+/** The hosted page posts this each time its card moves to another step (and when it first loads). */
+const STEP = 'mycomm.connect.step';
 
 /** Why a session ended without being completed here. Anything else the page might send reads as `unknown`. */
 const END_REASONS = ['expired', 'revoked', 'completed_elsewhere'];
@@ -103,6 +107,7 @@ export function sessionOrigin(url) {
  *     purpose: string | null, lineId: string | null}}
  *   | {kind: 'ended', detail: {sessionId: string | null, reason: 'expired' | 'revoked' | 'completed_elsewhere' | 'unknown',
  *     purpose: string | null, lineId: string | null}}
+ *   | {kind: 'step', detail: {sessionId: string | null, step: string, purpose: string | null, lineId: string | null}}
  *   | {kind: 'needs-popup'} | null}
  */
 export function readMessage(event, origin, source) {
@@ -116,13 +121,20 @@ export function readMessage(event, origin, source) {
   if (data.type === NEEDS_POPUP) {
     return { kind: 'needs-popup' };
   }
+  const text = (/** @type {unknown} */ value) => (typeof value === 'string' && value.length <= 64 ? value : null);
+  // Which link this was: its purpose (`connect`, `add_channel`, `replace_device`, `manage`, `claim`, or a newer one) and line.
+  const context = { purpose: text(data.purpose), lineId: text(data.line_id) };
+
+  if (data.type === STEP) {
+    // A step id such as `pair`; newer ids arrive as they are. A message without a usable one is dropped.
+    const step = typeof data.step === 'string' && /^[a-z][a-z0-9_]{0,63}$/.test(data.step) ? data.step : null;
+
+    return step === null ? null : { kind: 'step', detail: { sessionId: text(data.session_id), step, ...context } };
+  }
   const kind = OUTCOMES[/** @type {keyof typeof OUTCOMES} */ (data.type)];
   if (kind === undefined) {
     return null;
   }
-  const text = (/** @type {unknown} */ value) => (typeof value === 'string' && value.length <= 64 ? value : null);
-  // Which link this was: its purpose (`connect`, `add_channel`, `replace_device`, `manage`, `claim`, or a newer one) and line.
-  const context = { purpose: text(data.purpose), lineId: text(data.line_id) };
 
   if (kind === 'ended') {
     const reason = END_REASONS.includes(data.reason) ? data.reason : 'unknown';
@@ -170,7 +182,8 @@ const STYLE = `
  * Fires one of `mycomm-connect:completed` (detail {sessionId, deviceId, channelId}), `mycomm-connect:ended`
  * (detail {sessionId, reason}), `mycomm-connect:cancelled`, `mycomm-connect:closed` or `mycomm-connect:error`
  * (detail {code, message}) when a flow ends; every detail also has `purpose` and `lineId` as the hosted page reported them
- * (`null` when it did not). `purpose` only picks the default button label. Changing `url` or `mode`, or removing the
+ * (`null` when it did not). While the flow runs, `mycomm-connect:step` (detail {sessionId, step, purpose, lineId}) fires
+ * each time the hosted card moves to another step; it is not an outcome. `purpose` only picks the default button label. Changing `url` or `mode`, or removing the
  * element, abandons a flow in progress.
  */
 export class MyCommConnectElement extends HTMLElement {
@@ -289,6 +302,10 @@ export class MyCommConnectElement extends HTMLElement {
     }
     if (message.kind === 'needs-popup') {
       this.open();
+      return;
+    }
+    if (message.kind === 'step') {
+      this.emit('step', message.detail);
       return;
     }
     this.finish(message.kind, message.detail);
@@ -417,7 +434,7 @@ export class MyCommConnectElement extends HTMLElement {
  * Throws a `MyCommConnectError` for an option that cannot work, before anything is added to the page.
  *
  * @param {unknown} url
- * @param {{mode?: unknown, container?: unknown, height?: unknown, timeout?: unknown}} options
+ * @param {{mode?: unknown, container?: unknown, height?: unknown, timeout?: unknown, onStep?: unknown}} options
  */
 function checkOptions(url, options) {
   if (typeof url !== 'string' || url === '') {
@@ -438,14 +455,19 @@ function checkOptions(url, options) {
   if (options.timeout !== undefined && !(typeof options.timeout === 'number' && options.timeout > 0)) {
     throw new MyCommConnectError('invalid-option', 'timeout must be a number of minutes above zero.');
   }
+  if (options.onStep !== undefined && typeof options.onStep !== 'function') {
+    throw new MyCommConnectError('invalid-option', 'onStep must be a function.');
+  }
 }
 
 /**
  * Opens a session without placing an element yourself. Resolves with how it ended (`completed`, `ended`, `cancelled` or
- * `closed`) and rejects with a `MyCommConnectError` only when it cannot start or times out.
+ * `closed`) and rejects with a `MyCommConnectError` only when it cannot start or times out. `onStep` is called with
+ * {sessionId, step, purpose, lineId} each time the hosted card moves to another step.
  *
  * @param {string} url
- * @param {{mode?: 'popup' | 'inline', container?: HTMLElement, height?: number, timeout?: number}} [options]
+ * @param {{mode?: 'popup' | 'inline', container?: HTMLElement, height?: number, timeout?: number,
+ *     onStep?: (detail: {sessionId: string | null, step: string, purpose: string | null, lineId: string | null}) => void}} [options]
  * @returns {Promise<{status: 'completed', sessionId: string | null, deviceId: string | null, channelId: string | null,
  *     purpose: string | null, lineId: string | null}
  *   | {status: 'ended', sessionId: string | null, reason: 'expired' | 'revoked' | 'completed_elsewhere' | 'unknown',
@@ -475,6 +497,10 @@ export function open(url, options = {}) {
       element.hidden = true;
     }
 
+    const onStep = options.onStep;
+    if (onStep !== undefined) {
+      element.addEventListener('mycomm-connect:step', (event) => onStep(/** @type {CustomEvent} */ (event).detail));
+    }
     const done = (/** @type {() => void} */ settle) => {
       settle();
       element.remove();

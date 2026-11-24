@@ -60,12 +60,12 @@ Without a bundler, load an exact version with its integrity hash (printed by the
 
 ```html
 <!-- as a module: import "@mycomm/connect" semantics, the element registers itself -->
-<script type="module" src="https://cdn.jsdelivr.net/npm/@mycomm/connect@1.1.0/dist/mycomm-connect.min.js"
-        integrity="sha384-cEJ9jtIJGmPBNr6tAAXMaka94O8cJEUME8PSA7FR6IuVe/9vhOcaVGPKGZ0OvTIV" crossorigin="anonymous"></script>
+<script type="module" src="https://cdn.jsdelivr.net/npm/@mycomm/connect@1.2.0/dist/mycomm-connect.min.js"
+        integrity="sha384-h9ZZf4mFn42uUJe/KCt5g5LnrDj9Mdwi0UGFHv3l0KTnb/qBlgTu22k5+ghFNhEd" crossorigin="anonymous"></script>
 
 <!-- as a classic script: also sets window.MyCommConnect.open() -->
-<script src="https://cdn.jsdelivr.net/npm/@mycomm/connect@1.1.0/dist/mycomm-connect.iife.min.js"
-        integrity="sha384-8bubOxMkou37YAN3w7Neldo2Ig2auDHoULBqYh6PHZIOtu5sAtSYxh3Va8dubKgp" crossorigin="anonymous"></script>
+<script src="https://cdn.jsdelivr.net/npm/@mycomm/connect@1.2.0/dist/mycomm-connect.iife.min.js"
+        integrity="sha384-JMW6sc2AVmffbhQatELhxsesyXViIO0tmOt5BaVh0l1wyooNuqfr5fRUK0b5IA7n" crossorigin="anonymous"></script>
 ```
 
 | Attribute | |
@@ -109,6 +109,24 @@ widget.addEventListener('mycomm-connect:error', (event) => {
 });
 ```
 
+A `manage` link has no Cancel: its **Close** closes the popup (`closed`), and if the person stops texting for your app there
+the line is detached and you get `ended` with `reason` `revoked`.
+
+### Progress: which step the card is on
+
+While the flow runs, `mycomm-connect:step` fires each time the hosted card moves to another step (and when it first loads),
+with `{sessionId, step, purpose, lineId}`. It is not an outcome: the flow still ends in exactly one of the events above.
+`step` is one of `welcome`, `app`, `type`, `pair`, `setup`, `sims`, `connect`, `verify`, `done`, `test`, `continued`,
+`account` (anything in the person's own MyComm: signing in, picking a number, approving), `number_held`, `cancelled` or
+`manage`; more may be added, so treat one you do not know as "in progress". It comes from the same origin and window
+checks as the outcomes, and needs the page's origin in the link's `allowed_origins`. Your server reads the same from
+`GET /v1/links/{id}`, whose `step` is `open:<step>` while the link is open (API 2.2.0).
+
+```js
+widget.addEventListener('mycomm-connect:step', (event) => showProgress(event.detail.step));
+// or: await open(linkUrl, { onStep: ({ step }) => showProgress(step) });
+```
+
 Treat these events as a signal to refresh, not as proof: confirm on your server with `GET /partner/v1/links/{id}`
 (`GET /v1/links/{id}` for a user key) or `GET /partner/v1/lines/{id}/status`, or with the `line.connected`,
 `device.paired` and `channel.connected` webhooks.
@@ -139,11 +157,13 @@ button.addEventListener('click', async () => {
 | `container` | An element for an inline frame; `document.body` by default |
 | `height` | Inline frame height in pixels (default 640) |
 | `timeout` | Minutes until the flow ends in a `timeout` error |
+| `onStep` | A function called with `{sessionId, step, purpose, lineId}` each time the card moves to another step |
 
 ### TypeScript
 
 Types are included. `ConnectOutcome` is a union you can `switch` on by `status`, and the event names are typed on
-`HTMLElementEventMap`, so `event.detail` is typed in `addEventListener('mycomm-connect:completed', ...)`.
+`HTMLElementEventMap`, so `event.detail` is typed in `addEventListener('mycomm-connect:completed', ...)`. `ConnectStep` lists the step ids and
+`StepDetail` is the detail of `mycomm-connect:step`.
 
 ### React
 

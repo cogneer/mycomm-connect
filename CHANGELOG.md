@@ -1,5 +1,24 @@
 # Changelog
 
+## [1.2.0] - 2026-11-24
+
+For the API `2.2.0`, where the hosted card reports which step it is on. Only adds: a 1.1.0 page keeps working.
+
+### Integrity (SRI)
+
+- `dist/mycomm-connect.js`: `sha384-gJu/revRD7hw06svz18NW03KbZZq/bEEKIfp/Fx15b/9yhuDGvtiDJO7Pj7+Afag`
+- `dist/mycomm-connect.min.js`: `sha384-h9ZZf4mFn42uUJe/KCt5g5LnrDj9Mdwi0UGFHv3l0KTnb/qBlgTu22k5+ghFNhEd`
+- `dist/mycomm-connect.iife.min.js`: `sha384-JMW6sc2AVmffbhQatELhxsesyXViIO0tmOt5BaVh0l1wyooNuqfr5fRUK0b5IA7n`
+
+### Added
+
+- The `mycomm-connect:step` event, `{sessionId, step, purpose, lineId}`, from the hosted page's `mycomm.connect.step`
+  message: each time the card moves to another step, and when it first loads. Accepted only from the link's origin and the
+  window the widget opened, like the outcomes; a message without a plain step id is dropped. It is not an outcome.
+- The `onStep` option of `open()`, called with the same detail; anything but a function is `invalid-option`.
+- Types `ConnectStep` and `StepDetail`; `readMessage` returns `{kind: 'step', detail}` for the step message.
+- README: the step ids, and how a `manage` link ends (its Close is `closed`; Stop is `ended` with `reason` `revoked`).
+
 ## [1.1.0] - 2026-11-02
 
 For the API `2.0.0`, where hosted links for a line replace connect sessions. Only adds: a 1.0.0 page keeps working.

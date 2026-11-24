@@ -1,9 +1,9 @@
 // Type-checked in CI (`npm run lint`): what a TypeScript project writes against the published declarations.
-import MyCommConnect, { MyCommConnectError, open, readMessage, sessionOrigin, type ConnectOutcome, type LinkPurpose } from '../src/mycomm-connect.js';
+import MyCommConnect, { MyCommConnectError, open, readMessage, sessionOrigin, type ConnectOutcome, type ConnectStep, type LinkPurpose } from '../src/mycomm-connect.js';
 
 async function pair(sessionUrl: string): Promise<string> {
   try {
-    const outcome: ConnectOutcome = await open(sessionUrl, { mode: 'inline', height: 600, timeout: 30 });
+    const outcome: ConnectOutcome = await open(sessionUrl, { mode: 'inline', height: 600, timeout: 30, onStep: ({ step }) => console.log(step) });
     switch (outcome.status) {
       case 'completed':
         return `channel ${outcome.channelId} on device ${outcome.deviceId} for ${outcome.purpose ?? 'a link'} of line ${outcome.lineId}`;
@@ -26,6 +26,10 @@ widget?.addEventListener('mycomm-connect:completed', (event) => {
   const { sessionId, purpose, lineId } = event.detail;
   const known: LinkPurpose | (string & {}) | null = purpose;
   console.log(sessionId, known, lineId);
+});
+widget?.addEventListener('mycomm-connect:step', (event) => {
+  const step: ConnectStep | (string & {}) = event.detail.step;
+  console.log(event.detail.sessionId, step === 'pair' ? 'pairing' : step);
 });
 widget?.addEventListener('mycomm-connect:error', (event) => {
   console.log(event.detail.code, event.detail.message);
